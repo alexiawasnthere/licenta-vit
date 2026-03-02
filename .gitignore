@@ -27,3 +27,7 @@ runs/
 *.tfevents*
 events.out.tfevents*
 logs/
+
+# Notebooks & random test files
+notebooks/
+testeeee.py
