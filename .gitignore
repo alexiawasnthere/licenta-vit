@@ -21,3 +21,9 @@ checkpoints/
 
 # VS Code
 .vscode/
+
+runs/
+*.keras
+*.tfevents*
+events.out.tfevents*
+logs/
