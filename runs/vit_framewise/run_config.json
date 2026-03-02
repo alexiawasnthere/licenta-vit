@@ -1,0 +1,23 @@
+{
+  "seed": 42,
+  "batch_size": 4,
+  "num_frames": 37,
+  "img_size": 224,
+  "num_classes": 27,
+  "vit_cfg": {
+    "img_size": 224,
+    "patch_size": 32,
+    "embed_dim": 128,
+    "depth": 4,
+    "num_heads": 4,
+    "mlp_dim": 256,
+    "dropout": 0.1
+  },
+  "head_hidden": 256,
+  "head_dropout": 0.2,
+  "optimizer": "AdamW",
+  "lr": 0.0003,
+  "weight_decay": 0.0001,
+  "epochs": 5,
+  "sanity_only": false
+}

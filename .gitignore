@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environments
+venv/
+env/
+.conda/
+*.egg-info/
+
+# Dataset
+data/
+*.tar
+*.zip
+
+# Models
+checkpoints/
+*.h5
+*.ckpt
+
+# VS Code
+.vscode/
