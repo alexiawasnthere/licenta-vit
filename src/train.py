@@ -31,7 +31,7 @@ SANITY_VAL_STEPS = 1
 SANITY_BATCH_SIZE = 2
 
 
-EPOCHS = 30
+EPOCHS = 20
 
 
 def set_gpu_memory_growth() -> None:
@@ -60,7 +60,7 @@ def make_callbacks(out_dir: Path):
     return [
         # backup ca sa pot relua trainingul daca se inchide terminalul
         tf.keras.callbacks.BackupAndRestore(
-            backup_dir=str(backup_dir=str(backup_dir))
+            backup_dir=str(backup_dir)
         ),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=str(ckpt_path),
@@ -99,6 +99,7 @@ def main():
     # 0) setup
     set_seed(CFG.SEED)
     set_gpu_memory_growth()
+    tf.config.optimizer.set_jit(False)
 
     """
     tf.config.optimizer.set_jit(False)
@@ -135,18 +136,20 @@ def main():
 
     # 4) model
     vit_cfg = ViTConfig(
-        img_size=CFG.IMG_SIZE,
-        patch_size=32,
-        embed_dim=128,
-        depth=4,
-        num_heads=4,
-        mlp_dim=256,
+        img_height=CFG.IMG_HEIGHT,
+        img_width=CFG.IMG_WIDTH,
+        patch_size=16,
+        embed_dim=256,
+        depth=6,
+        num_heads=8,
+        mlp_dim=512,
         dropout=0.1,
         )
 
     model = build_video_vit_classifier(
         num_frames=CFG.NUM_FRAMES,
-        img_size=CFG.IMG_SIZE,
+        img_height=CFG.IMG_HEIGHT,
+        img_width=CFG.IMG_WIDTH,
         num_classes=num_classes,
         vit_cfg=vit_cfg,
         head_hidden=256,
@@ -155,11 +158,18 @@ def main():
 
     # 5) compile
     try:
-        optimizer = tf.keras.optimizers.AdamW(learning_rate=3e-4, weight_decay=1e-4)
+        optimizer = tf.keras.optimizers.AdamW(
+            learning_rate=3e-5,
+            weight_decay=1e-4,
+            clipnorm=1.0
+        )
         opt_name = "AdamW"
         weight_decay = 1e-4
     except AttributeError:
-        optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=3e-5,
+            clipnorm=1.0
+        )
         opt_name = "Adam"
         weight_decay = None
         print("[warn] adamw not available, fallback to adam")
@@ -187,13 +197,14 @@ def main():
         "seed": CFG.SEED,
         "batch_size": batch_size,
         "num_frames": CFG.NUM_FRAMES,
-        "img_size": CFG.IMG_SIZE,
+        "img_height": CFG.IMG_HEIGHT,
+        "img_width": CFG.IMG_WIDTH,
         "num_classes": num_classes,
         "vit_cfg": vit_cfg.__dict__,
         "head_hidden": 256,
         "head_dropout": 0.2,
         "optimizer": opt_name,
-        "lr": 3e-4,
+        "lr": 3e-5,
         "weight_decay": weight_decay,
         "epochs": EPOCHS,
         "sanity_only": SANITY_ONLY,

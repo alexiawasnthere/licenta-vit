@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import random
 
+import tensorflow as tf
 import numpy as np
 import pandas as pd
 
@@ -19,7 +20,9 @@ class Config:
 
     # video settings
     NUM_FRAMES: int = 37
-    IMG_SIZE: int = 224
+    
+    IMG_HEIGHT: int = 96
+    IMG_WIDTH: int = 160
 
     # training settings
     BATCH_SIZE: int = 4
@@ -39,6 +42,7 @@ def set_seed(seed: int) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
+    tf.random.set_seed(seed)
 
 
 def load_csv(csv_path: Path, require_labels: bool = True) -> pd.DataFrame:

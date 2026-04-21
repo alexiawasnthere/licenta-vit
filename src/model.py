@@ -3,26 +3,24 @@ import tensorflow as tf
 layers = tf.keras.layers
 
 
-# config pentru vit (pe frame)
 @dataclass(frozen=True)
 class ViTConfig:
-    img_size: int = 224
-    patch_size: int = 32
-    embed_dim: int = 128
-    depth: int = 4
-    num_heads: int = 4
-    mlp_dim: int = 256
+    img_height: int = 96
+    img_width: int = 160
+    patch_size: int = 16
+    embed_dim: int = 256
+    depth: int = 6
+    num_heads: int = 8
+    mlp_dim: int = 512
     dropout: float = 0.1
 
 
 class AddCLSToken(layers.Layer):
-    # token cls trainable
     def __init__(self, embed_dim: int, **kwargs):
         super().__init__(**kwargs)
         self.embed_dim = embed_dim
 
     def build(self, input_shape):
-        # input_shape: (B, N, D)
         self.cls = self.add_weight(
             name="cls_token",
             shape=(1, 1, self.embed_dim),
@@ -31,9 +29,11 @@ class AddCLSToken(layers.Layer):
         )
 
     def call(self, x):
+        # x: (B, N, D)
         b = tf.shape(x)[0]
-        cls_tokens = tf.tile(self.cls, [b, 1, 1])
-        return tf.concat([cls_tokens, x], axis=1)  # (B, N+1, D)
+        cls_tokens = tf.tile(self.cls, [b, 1, 1])   # (B, 1, D)
+        return tf.concat([cls_tokens, x], axis=1)   # (B, N+1, D)
+
 
 
 class AddPositionEmbedding(layers.Layer):
@@ -55,7 +55,6 @@ class AddPositionEmbedding(layers.Layer):
 
 
 class TransformerBlock(layers.Layer):
-    # bloc standard transformer encoder
     def __init__(self, embed_dim: int, num_heads: int, mlp_dim: int, dropout: float, **kwargs):
         super().__init__(**kwargs)
         self.norm1 = layers.LayerNormalization(epsilon=1e-6)
@@ -73,13 +72,12 @@ class TransformerBlock(layers.Layer):
         self.drop3 = layers.Dropout(dropout)
 
     def call(self, x, training=False):
-        # self-attention + residual
         y = self.norm1(x)
         y = self.attn(y, y, training=training)
         y = self.drop1(y, training=training)
         x = x + y
 
-        # mlp + residual
+        # MLP + residual
         y = self.norm2(x)
         y = self.mlp1(y)
         y = self.drop2(y, training=training)
@@ -88,17 +86,41 @@ class TransformerBlock(layers.Layer):
         return x + y
 
 
+class TemporalAttentionPooling(layers.Layer):
+    """
+    Primeste secventa (B, T, D) si invata ponderi de atentie pe timp.
+    Intoarce un singur vector (B, D).
+    """
+    def __init__(self, attn_hidden: int = 128, **kwargs):
+        super().__init__(**kwargs)
+        self.score_mlp = tf.keras.Sequential([
+            layers.Dense(attn_hidden, activation="tanh"),
+            layers.Dense(1)
+        ])
+
+    def call(self, x):
+        # x: (B, T, D)
+        scores = self.score_mlp(x)                 # (B, T, 1)
+        weights = tf.nn.softmax(scores, axis=1)   # (B, T, 1)
+        context = tf.reduce_sum(weights * x, axis=1)  # (B, D)
+        return context
+
+
 def build_vit_encoder(cfg: ViTConfig) -> tf.keras.Model:
-    # vit pentru un frame: (h,w,3) -> (d)
-    if cfg.img_size % cfg.patch_size != 0:
-        raise ValueError("img_size trebuie sa fie divizibil cu patch_size")
+    if cfg.img_height % cfg.patch_size != 0:
+        raise ValueError("img_height trebuie sa fie divizibil cu patch_size")
 
-    num_patches = (cfg.img_size // cfg.patch_size) ** 2
-    num_tokens = num_patches + 1  # + cls
+    if cfg.img_width % cfg.patch_size != 0:
+        raise ValueError("img_width trebuie sa fie divizibil cu patch_size")
 
-    inputs = layers.Input(shape=(cfg.img_size, cfg.img_size, 3), name="frame")
+    num_patches_h = cfg.img_height // cfg.patch_size
+    num_patches_w = cfg.img_width // cfg.patch_size
+    num_patches = num_patches_h * num_patches_w
+    num_tokens = num_patches + 1
 
-    # patch embedding (conv stride=patch_size)
+    inputs = layers.Input(shape=(cfg.img_height, cfg.img_width, 3), name="frame")
+
+    # patch embedding
     x = layers.Conv2D(
         filters=cfg.embed_dim,
         kernel_size=cfg.patch_size,
@@ -106,48 +128,66 @@ def build_vit_encoder(cfg: ViTConfig) -> tf.keras.Model:
         padding="valid",
         name="patch_embed"
     )(inputs)
+
     x = layers.Reshape((num_patches, cfg.embed_dim), name="flatten_patches")(x)
 
-    # cls + positional
+    # CLS + positional embedding
     x = AddCLSToken(cfg.embed_dim, name="add_cls")(x)
     x = AddPositionEmbedding(num_tokens, cfg.embed_dim, name="add_pos")(x)
-    x = layers.Dropout(cfg.dropout)(x)
+    x = layers.Dropout(cfg.dropout, name="token_dropout")(x)
 
-    # transformer blocks
+    # transformer encoder
     for i in range(cfg.depth):
-        x = TransformerBlock(cfg.embed_dim, cfg.num_heads, cfg.mlp_dim, cfg.dropout, name=f"block_{i}")(x)
+        x = TransformerBlock(
+            cfg.embed_dim,
+            cfg.num_heads,
+            cfg.mlp_dim,
+            cfg.dropout,
+            name=f"block_{i}"
+        )(x)
 
     x = layers.LayerNormalization(epsilon=1e-6, name="encoder_norm")(x)
 
-    # folosim cls ca embedding final
-    cls_out = layers.Lambda(lambda t: t[:, 0, :], name="cls_select")(x)
-    return tf.keras.Model(inputs, cls_out, name="vit_encoder")
+    # folosim CLS token ca reprezentare finala
+    x = layers.Lambda(lambda t: t[:, 0, :], name="cls_select")(x)
+
+    return tf.keras.Model(inputs, x, name="vit_encoder")
 
 
 def build_video_vit_classifier(
     num_frames: int,
-    img_size: int,
+    img_height: int,
+    img_width: int,
     num_classes: int,
     vit_cfg: ViTConfig | None = None,
     head_hidden: int = 256,
     head_dropout: float = 0.2,
 ) -> tf.keras.Model:
-    # model video: vit pe fiecare frame + pooling temporal
-    vit_cfg = vit_cfg or ViTConfig(img_size=img_size)
+    vit_cfg = vit_cfg or ViTConfig(img_height=img_height, img_width=img_width)
     vit_encoder = build_vit_encoder(vit_cfg)
 
-    inputs = layers.Input(shape=(num_frames, img_size, img_size, 3), name="clip")
+    inputs = layers.Input(shape=(num_frames, img_height, img_width, 3), name="clip")
 
-    # aplica vit pe frame-uri
-    x = layers.TimeDistributed(vit_encoder, name="vit_per_frame")(inputs)  # (b, t, d)
+    # 1) embedding per frame
+    x = layers.TimeDistributed(vit_encoder, name="vit_per_frame")(inputs)   # (B, T, 256)
 
-    # pooling temporal (mean)
-    x = layers.GlobalAveragePooling1D(name="temporal_mean")(x)  # (b, d)
+    # 2) normalizare temporala
+    x = layers.LayerNormalization(epsilon=1e-6, name="temporal_norm")(x)
 
-    # head de clasificare
-    x = layers.Dropout(head_dropout)(x)
-    x = layers.Dense(head_hidden, activation=tf.nn.gelu)(x)
-    x = layers.Dropout(head_dropout)(x)
+    # 3) modelare temporala
+    x = layers.Bidirectional(
+        layers.LSTM(128, return_sequences=True),
+        name="temporal_bilstm"
+    )(x)  # (B, T, 256)
+
+    x = layers.Dropout(0.2, name="temporal_dropout")(x)
+
+    # 4) attention pooling pe timp
+    x = TemporalAttentionPooling(attn_hidden=128, name="temporal_attention")(x)  # (B, 256)
+
+    # 5) head de clasificare
+    x = layers.Dense(head_hidden, activation=tf.nn.gelu, name="head_dense")(x)
+    x = layers.Dropout(head_dropout, name="head_dropout")(x)
     outputs = layers.Dense(num_classes, activation="softmax", name="probs")(x)
 
-    return tf.keras.Model(inputs, outputs, name="video_vit_framewise")
+    return tf.keras.Model(inputs, outputs, name="video_vit_bilstm_attn")

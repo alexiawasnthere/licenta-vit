@@ -10,15 +10,15 @@ SplitName = Literal["Train", "Validation", "Test"]
 
 def build_dataset(
     df: pd.DataFrame,
-    split: SplitName,
+    split,
     training: bool,
     batch_size: int = CFG.BATCH_SIZE,
     debug: bool = False,
     shuffle_buffer: int = 2048
     ) -> tf.data.Dataset:
     # creeaza dataset (video_id, label_id) -> (clip, label_id)
-    video_ids = df[CFG.COL_VIDEO_ID].to_numpy()
-    label_ids = df[CFG.COL_LABEL_ID].to_numpy()
+    video_ids = df[CFG.COL_VIDEO_ID].to_numpy("int32")
+    label_ids = df[CFG.COL_LABEL_ID].to_numpy("int32")
 
     ds = tf.data.Dataset.from_tensor_slices((video_ids, label_ids))
 
@@ -39,10 +39,20 @@ def build_dataset(
 
     data_root = str(CFG.DATA_ROOT)
     num_frames = CFG.NUM_FRAMES
-    img_size = CFG.IMG_SIZE
+    img_height = CFG.IMG_HEIGHT
+    img_width = CFG.IMG_WIDTH
 
     ds = ds.map(
-        lambda vid, lid: load_clip_and_label_tf(data_root, num_frames, img_size, split, vid, lid),
+        lambda vid, lid: load_clip_and_label_tf(
+            data_root, 
+            num_frames, 
+            img_height, 
+            img_width, 
+            split, 
+            vid, 
+            lid, 
+            training
+        ),
         num_parallel_calls=(1 if debug else tf.data.AUTOTUNE)
         )
 

@@ -14,9 +14,10 @@ def main():
 
     model = build_video_vit_classifier(
         num_frames=CFG.NUM_FRAMES,
-        img_size=CFG.IMG_SIZE,
+        img_height=CFG.IMG_HEIGHT,
+        img_width=CFG.IMG_WIDTH,
         num_classes=num_classes,
-        vit_cfg=ViTConfig(img_size=CFG.IMG_SIZE)
+        #vit_cfg=ViTConfig(img_size=CFG.IMG_SIZE)
     )
 
     out = model(x, training=False)
