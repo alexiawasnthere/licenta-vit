@@ -39,15 +39,13 @@ def build_dataset(
 
     data_root = str(CFG.DATA_ROOT)
     num_frames = CFG.NUM_FRAMES
-    img_height = CFG.IMG_HEIGHT
-    img_width = CFG.IMG_WIDTH
+    img_size = CFG.IMG_SIZE
 
     ds = ds.map(
         lambda vid, lid: load_clip_and_label_tf(
             data_root, 
             num_frames, 
-            img_height, 
-            img_width, 
+            img_size, 
             split, 
             vid, 
             lid, 

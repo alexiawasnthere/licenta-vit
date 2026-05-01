@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+from sklearn.utils.class_weight import compute_class_weight
+import numpy as np
+
 import os
 import warnings
 
@@ -28,10 +31,10 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # optional, reduce variabilitatea
 SANITY_ONLY = False
 SANITY_TRAIN_STEPS = 2
 SANITY_VAL_STEPS = 1
-SANITY_BATCH_SIZE = 2
+SANITY_BATCH_SIZE = 4
 
 
-EPOCHS = 20
+EPOCHS = 10
 
 
 def set_gpu_memory_growth() -> None:
@@ -109,8 +112,45 @@ def main():
 
     # 1) load csv
     train_df = load_csv(CFG.CSV_TRAIN, require_labels=True)
+
+    labels = train_df[CFG.COL_LABEL_ID].values
+
+   #classes = np.unique(labels)
+
+   #class_weights_values = compute_class_weight(
+   #    class_weight="balanced",
+   #    classes=classes,
+   #    y=labels
+   #)
+
+   #class_weights = dict(zip(classes, class_weights_values))
+
     val_df = load_csv(CFG.CSV_VAL, require_labels=True)
 
+    TOP_K_CLASSES = 5
+
+    top_labels = (
+        train_df[CFG.COL_LABEL]
+        .value_counts()
+        .head(TOP_K_CLASSES)
+        .index
+        .tolist()
+    )
+
+    train_df = train_df[train_df[CFG.COL_LABEL].isin(top_labels)].copy()
+    val_df = val_df[val_df[CFG.COL_LABEL].isin(top_labels)].copy()
+
+    # refacem label_id-urile ca sa fie 0..4
+    label_to_new_id = {label: i for i, label in enumerate(top_labels)}
+
+    train_df[CFG.COL_LABEL_ID] = train_df[CFG.COL_LABEL].map(label_to_new_id).astype(int)
+    val_df[CFG.COL_LABEL_ID] = val_df[CFG.COL_LABEL].map(label_to_new_id).astype(int)
+
+    print("Clase folosite:", top_labels)
+    print("Train rows dupa filtrare:", len(train_df))
+    print("Val rows dupa filtrare:", len(val_df))
+
+    
     # 2) labels
     num_classes, class_names, label_to_id, _ = make_label_mapping(train_df)
     check_split(val_df, label_to_id, "Validation")
@@ -136,8 +176,7 @@ def main():
 
     # 4) model
     vit_cfg = ViTConfig(
-        img_height=CFG.IMG_HEIGHT,
-        img_width=CFG.IMG_WIDTH,
+        img_size=CFG.IMG_SIZE,
         patch_size=16,
         embed_dim=256,
         depth=6,
@@ -148,8 +187,7 @@ def main():
 
     model = build_video_vit_classifier(
         num_frames=CFG.NUM_FRAMES,
-        img_height=CFG.IMG_HEIGHT,
-        img_width=CFG.IMG_WIDTH,
+        img_size=CFG.IMG_SIZE,
         num_classes=num_classes,
         vit_cfg=vit_cfg,
         head_hidden=256,
@@ -159,7 +197,7 @@ def main():
     # 5) compile
     try:
         optimizer = tf.keras.optimizers.AdamW(
-            learning_rate=3e-5,
+            learning_rate=1e-4,
             weight_decay=1e-4,
             clipnorm=1.0
         )
@@ -167,7 +205,7 @@ def main():
         weight_decay = 1e-4
     except AttributeError:
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=3e-5,
+            learning_rate=1e-4,
             clipnorm=1.0
         )
         opt_name = "Adam"
@@ -197,14 +235,13 @@ def main():
         "seed": CFG.SEED,
         "batch_size": batch_size,
         "num_frames": CFG.NUM_FRAMES,
-        "img_height": CFG.IMG_HEIGHT,
-        "img_width": CFG.IMG_WIDTH,
+        "img_size": CFG.IMG_SIZE,
         "num_classes": num_classes,
         "vit_cfg": vit_cfg.__dict__,
         "head_hidden": 256,
         "head_dropout": 0.2,
         "optimizer": opt_name,
-        "lr": 3e-5,
+        "lr": 1e-4,
         "weight_decay": weight_decay,
         "epochs": EPOCHS,
         "sanity_only": SANITY_ONLY,
@@ -222,6 +259,7 @@ def main():
             validation_data=val_ds.take(SANITY_VAL_STEPS),
             epochs=1,
             callbacks=callbacks,
+            #class_weight=class_weights
         )
         print("[sanity] ok. pune SANITY_ONLY=False pentru training complet")
         return
@@ -231,6 +269,7 @@ def main():
         validation_data=val_ds,
         epochs=EPOCHS,
         callbacks=callbacks,
+        #class_weight=class_weights
     )
 
     # 7) save last model

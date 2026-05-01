@@ -21,8 +21,7 @@ class Config:
     # video settings
     NUM_FRAMES: int = 37
     
-    IMG_HEIGHT: int = 96
-    IMG_WIDTH: int = 160
+    IMG_SIZE: int = 128
 
     # training settings
     BATCH_SIZE: int = 4

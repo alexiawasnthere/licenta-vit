@@ -5,8 +5,7 @@ layers = tf.keras.layers
 
 @dataclass(frozen=True)
 class ViTConfig:
-    img_height: int = 96
-    img_width: int = 160
+    img_size: int = 128
     patch_size: int = 16
     embed_dim: int = 256
     depth: int = 6
@@ -107,18 +106,14 @@ class TemporalAttentionPooling(layers.Layer):
 
 
 def build_vit_encoder(cfg: ViTConfig) -> tf.keras.Model:
-    if cfg.img_height % cfg.patch_size != 0:
-        raise ValueError("img_height trebuie sa fie divizibil cu patch_size")
+    if cfg.img_size % cfg.patch_size != 0:
+        raise ValueError("img_size trebuie sa fie divizibil cu patch_size")
 
-    if cfg.img_width % cfg.patch_size != 0:
-        raise ValueError("img_width trebuie sa fie divizibil cu patch_size")
+    num_patches_per_side = cfg.img_size // cfg.patch_size
+    num_patches = num_patches_per_side * num_patches_per_side
+    num_tokens = num_patches + 1  # + CLS
 
-    num_patches_h = cfg.img_height // cfg.patch_size
-    num_patches_w = cfg.img_width // cfg.patch_size
-    num_patches = num_patches_h * num_patches_w
-    num_tokens = num_patches + 1
-
-    inputs = layers.Input(shape=(cfg.img_height, cfg.img_width, 3), name="frame")
+    inputs = layers.Input(shape=(cfg.img_size, cfg.img_size, 3), name="frame")
 
     # patch embedding
     x = layers.Conv2D(
@@ -148,25 +143,23 @@ def build_vit_encoder(cfg: ViTConfig) -> tf.keras.Model:
 
     x = layers.LayerNormalization(epsilon=1e-6, name="encoder_norm")(x)
 
-    # folosim CLS token ca reprezentare finala
+    # CLS token = reprezentarea finala a frame-ului
     x = layers.Lambda(lambda t: t[:, 0, :], name="cls_select")(x)
 
     return tf.keras.Model(inputs, x, name="vit_encoder")
 
-
 def build_video_vit_classifier(
     num_frames: int,
-    img_height: int,
-    img_width: int,
+    img_size: int,
     num_classes: int,
     vit_cfg: ViTConfig | None = None,
     head_hidden: int = 256,
     head_dropout: float = 0.2,
 ) -> tf.keras.Model:
-    vit_cfg = vit_cfg or ViTConfig(img_height=img_height, img_width=img_width)
+    vit_cfg = vit_cfg or ViTConfig(img_size=img_size)
     vit_encoder = build_vit_encoder(vit_cfg)
 
-    inputs = layers.Input(shape=(num_frames, img_height, img_width, 3), name="clip")
+    inputs = layers.Input(shape=(num_frames, img_size, img_size, 3), name="clip")
 
     # 1) embedding per frame
     x = layers.TimeDistributed(vit_encoder, name="vit_per_frame")(inputs)   # (B, T, 256)
@@ -176,14 +169,12 @@ def build_video_vit_classifier(
 
     # 3) modelare temporala
     x = layers.Bidirectional(
-        layers.LSTM(128, return_sequences=True),
-        name="temporal_bilstm"
-    )(x)  # (B, T, 256)
-
+        layers.LSTM(256, return_sequences=True),
+    )(x)
     x = layers.Dropout(0.2, name="temporal_dropout")(x)
 
     # 4) attention pooling pe timp
-    x = TemporalAttentionPooling(attn_hidden=128, name="temporal_attention")(x)  # (B, 256)
+    x = TemporalAttentionPooling(attn_hidden=256, name="temporal_attention")(x)  # (B, 256)
 
     # 5) head de clasificare
     x = layers.Dense(head_hidden, activation=tf.nn.gelu, name="head_dense")(x)
