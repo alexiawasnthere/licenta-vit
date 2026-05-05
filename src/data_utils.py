@@ -20,6 +20,7 @@ def decode_and_resize_jpeg(
         img = tf.image.random_brightness(img, 0.1)
         img = tf.image.random_contrast(img, 0.8, 1.2)
         img = tf.image.random_saturation(img, 0.8, 1.2)
+        img = tf.clip_by_value(img, 0.0, 1.0)
 
     return img
 
@@ -44,7 +45,7 @@ def load_clip(
     # varianta python (pentru test / debug)
     frame_paths = get_frame_paths(data_root, num_frames, video_id, split, strict=True)
     frame_strs = [str(p) for p in frame_paths]
-    frames = [load_frame(tf.constant(p), img_size, img_size, training= False) for p in frame_strs]
+    frames = [load_frame(tf.constant(p), img_size, training=False) for p in frame_strs]
     return tf.stack(frames, axis=0)  # (t, h, w, c)
 
 
@@ -57,7 +58,7 @@ def load_clip_and_label(
     split: SplitName
 ) -> Tuple[tf.Tensor, tf.Tensor]:
     # (clip, label_id) pentru debug
-    clip = load_clip(data_root, num_frames, img_size, img_size, video_id, split)
+    clip = load_clip(data_root, num_frames, img_size, video_id, split)
     y = tf.convert_to_tensor(label_id, dtype=tf.int32)
     return clip, y
 
@@ -95,6 +96,7 @@ def load_clip_tf(
 
         frames = tf.image.random_brightness(frames, 0.1)
         frames = tf.image.random_contrast(frames, 0.8, 1.2)
+        frames = tf.clip_by_value(frames, 0.0, 1.0)
 
     # ajuta keras la shape inference
     frames.set_shape([num_frames, img_size, img_size, 3])

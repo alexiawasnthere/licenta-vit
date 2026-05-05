@@ -6,7 +6,7 @@ layers = tf.keras.layers
 @dataclass(frozen=True)
 class ViTConfig:
     img_size: int = 128
-    patch_size: int = 16
+    patch_size: int = 8
     embed_dim: int = 256
     depth: int = 6
     num_heads: int = 8
@@ -105,6 +105,48 @@ class TemporalAttentionPooling(layers.Layer):
         return context
 
 
+def build_frame_cnn_encoder(
+    img_size: int,
+    backbone: str = "efficientnet_b0",
+    weights: str | None = "imagenet",
+    trainable_backbone: bool = False,
+    embedding_dim: int = 256,
+    dropout: float = 0.2,
+) -> tf.keras.Model:
+    inputs = layers.Input(shape=(img_size, img_size, 3), name="frame")
+
+    # Dataset-ul este incarcat in [0, 1]. Modelele Keras pretrained asteapta
+    # valori de tip imagine in [0, 255] si isi aplica preprocessing-ul intern.
+    x = layers.Rescaling(255.0, name="to_255")(inputs)
+
+    if backbone == "efficientnet_b0":
+        base = tf.keras.applications.EfficientNetB0(
+            include_top=False,
+            weights=weights,
+            input_shape=(img_size, img_size, 3),
+            pooling="avg",
+        )
+    elif backbone == "mobilenet_v3_small":
+        base = tf.keras.applications.MobileNetV3Small(
+            include_top=False,
+            weights=weights,
+            input_shape=(img_size, img_size, 3),
+            pooling="avg",
+        )
+    else:
+        raise ValueError(
+            "backbone trebuie sa fie 'efficientnet_b0' sau 'mobilenet_v3_small'"
+        )
+
+    base.trainable = trainable_backbone
+    x = base(x, training=trainable_backbone)
+    x = layers.Dropout(dropout, name="frame_dropout")(x)
+    x = layers.Dense(embedding_dim, activation=tf.nn.gelu, name="frame_embedding")(x)
+    x = layers.LayerNormalization(epsilon=1e-6, name="frame_norm")(x)
+
+    return tf.keras.Model(inputs, x, name=f"{backbone}_frame_encoder")
+
+
 def build_vit_encoder(cfg: ViTConfig) -> tf.keras.Model:
     if cfg.img_size % cfg.patch_size != 0:
         raise ValueError("img_size trebuie sa fie divizibil cu patch_size")
@@ -147,6 +189,48 @@ def build_vit_encoder(cfg: ViTConfig) -> tf.keras.Model:
     x = layers.Lambda(lambda t: t[:, 0, :], name="cls_select")(x)
 
     return tf.keras.Model(inputs, x, name="vit_encoder")
+
+
+def build_video_cnn_lstm_classifier(
+    num_frames: int,
+    img_size: int,
+    num_classes: int,
+    backbone: str = "efficientnet_b0",
+    weights: str | None = "imagenet",
+    trainable_backbone: bool = False,
+    embedding_dim: int = 256,
+    lstm_units: int = 256,
+    head_hidden: int = 256,
+    head_dropout: float = 0.2,
+) -> tf.keras.Model:
+    frame_encoder = build_frame_cnn_encoder(
+        img_size=img_size,
+        backbone=backbone,
+        weights=weights,
+        trainable_backbone=trainable_backbone,
+        embedding_dim=embedding_dim,
+        dropout=head_dropout,
+    )
+
+    inputs = layers.Input(shape=(num_frames, img_size, img_size, 3), name="clip")
+
+    x = layers.TimeDistributed(frame_encoder, name="cnn_per_frame")(inputs)
+    x = layers.LayerNormalization(epsilon=1e-6, name="temporal_norm")(x)
+
+    x = layers.Bidirectional(
+        layers.LSTM(lstm_units, return_sequences=True),
+        name="temporal_bilstm",
+    )(x)
+    x = layers.Dropout(head_dropout, name="temporal_dropout")(x)
+
+    x = TemporalAttentionPooling(attn_hidden=head_hidden, name="temporal_attention")(x)
+
+    x = layers.Dense(head_hidden, activation=tf.nn.gelu, name="head_dense")(x)
+    x = layers.Dropout(head_dropout, name="head_dropout")(x)
+    outputs = layers.Dense(num_classes, activation="softmax", name="probs")(x)
+
+    return tf.keras.Model(inputs, outputs, name=f"video_{backbone}_bilstm_attn")
+
 
 def build_video_vit_classifier(
     num_frames: int,

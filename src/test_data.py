@@ -8,7 +8,7 @@ def main():
     train = load_csv(CFG.CSV_TRAIN, require_labels=True)
 
     ex_id = int(train.iloc[0][CFG.COL_VIDEO_ID])
-    clip = load_clip(CFG.DATA_ROOT, CFG.NUM_FRAMES, CFG.IMG_HEIGHT, CFG.IMG_WIDTH, ex_id, "Train")
+    clip = load_clip(CFG.DATA_ROOT, CFG.NUM_FRAMES, CFG.IMG_SIZE, ex_id, "Train")
 
     print("video_id:", ex_id)
     print("clip shape:", clip.shape)
