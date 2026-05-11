@@ -22,7 +22,8 @@ SANITY_TRAIN_STEPS = 2
 SANITY_VAL_STEPS = 1
 SANITY_BATCH_SIZE = 2
 
-EPOCHS = 30
+INITIAL_EPOCH = 31
+TOTAL_EPOCHS = 35
 TOP_K_CLASSES = 27
 
 
@@ -240,19 +241,32 @@ def main():
     )
 
     # 4) model
-    model = build_video_3d_cnn_classifier(
-        num_frames=CFG.NUM_FRAMES,
-        img_size=CFG.IMG_SIZE,
-        num_classes=num_classes,
-        base_filters=16,
-        head_hidden=256,
-        head_dropout=0.4,
-    )
+    RESUME_TRAINING = True
+    RESUME_FROM_BEST = True
+
+    if RESUME_FROM_BEST:
+        resume_path = out_dir / "best_model_3d_cnn.keras"
+    else:
+        resume_path = out_dir / "last_model_3d_cnn.keras"
+
+    if RESUME_TRAINING and resume_path.exists():
+        print(f"[INFO] Loading existing model from: {resume_path}")
+        model = tf.keras.models.load_model(resume_path)
+    else:
+        print("[INFO] No saved model found. Building a new model.")
+        model = build_video_3d_cnn_classifier(
+            num_frames=CFG.NUM_FRAMES,
+            img_size=CFG.IMG_SIZE,
+            num_classes=num_classes,
+            base_filters=16,
+            head_hidden=256,
+            head_dropout=0.4,
+        )
 
     # 5) compile
     try:
         optimizer = tf.keras.optimizers.AdamW(
-            learning_rate=3e-4,
+            learning_rate=3e-5,
             weight_decay=1e-4,
             clipnorm=1.0,
         )
@@ -260,7 +274,7 @@ def main():
         weight_decay = 1e-4
     except AttributeError:
         optimizer = tf.keras.optimizers.Adam(
-            learning_rate=3e-4,
+            learning_rate=3e-5,
             clipnorm=1.0,
         )
         opt_name = "Adam"
@@ -300,9 +314,9 @@ def main():
         "head_hidden": 256,
         "head_dropout": 0.4,
         "optimizer": opt_name,
-        "lr": 3e-4,
+        "lr": 3e-5,
         "weight_decay": weight_decay,
-        "epochs": EPOCHS,
+        "epochs": TOTAL_EPOCHS,
         "sanity_only": SANITY_ONLY,
     }
     with open(out_dir / "run_config.json", "w", encoding="utf-8") as f:
@@ -328,7 +342,8 @@ def main():
     model.fit(
         train_ds,
         validation_data=val_ds,
-        epochs=EPOCHS,
+        initial_epoch=INITIAL_EPOCH,
+        epochs=TOTAL_EPOCHS,
         callbacks=callbacks,
     )
 
